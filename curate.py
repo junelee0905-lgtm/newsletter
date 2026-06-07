@@ -112,7 +112,7 @@ def curate(taste_profile, date_str):
         try:
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=1500,
+                max_tokens=2500,
                 tools=[{
                     "type": "web_search_20250305",
                     "name": "web_search",
@@ -138,7 +138,7 @@ def curate(taste_profile, date_str):
         print(f"[warn] JSON 파싱 실패 ({e}). 재시도…")
         repair = client.messages.create(
             model=MODEL,
-            max_tokens=1500,
+            max_tokens=2500,
             messages=[
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": text},
