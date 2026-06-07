@@ -1,0 +1,10 @@
+# secrets & local config
+.env
+
+# generated previews
+last_issue.html
+_preview.*
+
+# python
+__pycache__/
+*.pyc
