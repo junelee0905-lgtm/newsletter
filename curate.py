@@ -36,7 +36,7 @@ TASTE_FILE = os.path.join(HERE, "taste_profile.md")
 # Switch to "claude-opus-4-8" for the highest-quality curation (slower, pricier).
 MODEL = os.environ.get("NEWSLETTER_MODEL", "claude-sonnet-4-6")
 
-MAX_SEARCHES = int(os.environ.get("NEWSLETTER_MAX_SEARCHES", "10"))
+MAX_SEARCHES = int(os.environ.get("NEWSLETTER_MAX_SEARCHES", "5"))
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
 
 CATEGORIES = [
@@ -179,7 +179,7 @@ def curate(taste_profile, date_str):
     print(f"[info] Calling {MODEL} with web search (max {MAX_SEARCHES} searches)…")
     response = client.messages.create(
         model=MODEL,
-        max_tokens=6000,
+        max_tokens=3000,
         tools=[{
             "type": "web_search_20250305",
             "name": "web_search",
@@ -199,7 +199,7 @@ def curate(taste_profile, date_str):
         print(f"[warn] JSON parse failed ({e}); retrying with a repair prompt…")
         repair = client.messages.create(
             model=MODEL,
-            max_tokens=6000,
+            max_tokens=3000,
             messages=[
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": text},
