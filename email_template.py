@@ -47,14 +47,14 @@ def _discovery_block(d, index, total):
     image    = d.get("image")                # hero image url
     image2   = d.get("image2")               # optional second image
 
-    # ── hero image ──
+    # ── hero image → photo link ──
     image_html = ""
     if image:
         image_html = f"""
-        <tr><td style="padding:0 0 30px 0;">
-          <img src="{_esc(image)}" width="504" alt="{title}"
-               style="display:block;width:100%;max-width:504px;height:auto;border:0;
-                      border-radius:18px;background:{PANEL};" />
+        <tr><td style="padding:0 0 24px 0;">
+          <a href="{_esc(image)}" target="_blank"
+             style="font-family:{SF_TEXT};font-size:15px;font-weight:400;
+                    color:{BLUE};text-decoration:none;">사진 보기 &#8250;</a>
         </td></tr>"""
 
     # ── eyebrow (category) ──
@@ -76,14 +76,14 @@ def _discovery_block(d, index, total):
         <div style="font-family:{SF_TEXT};font-size:17px;font-weight:400;
                     color:{INK};line-height:1.6;margin:22px 0 0 0;">{body}</div>"""
 
-    # ── second image (between body and aside) ──
+   # ── second image → photo link ──
     image2_html = ""
     if image2:
         image2_html = f"""
-        <div style="margin:24px 0 0 0;">
-          <img src="{_esc(image2)}" width="504" alt="{title}"
-               style="display:block;width:100%;max-width:504px;height:auto;border:0;
-                      border-radius:14px;background:{PANEL};" />
+        <div style="margin:16px 0 0 0;">
+          <a href="{_esc(image2)}" target="_blank"
+             style="font-family:{SF_TEXT};font-size:15px;font-weight:400;
+                    color:{BLUE};text-decoration:none;">사진 더 보기 &#8250;</a>
         </div>"""
 
     # ── aside (여담) — boxed, lighter ──
