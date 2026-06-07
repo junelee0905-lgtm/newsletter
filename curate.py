@@ -16,7 +16,8 @@ from email_template import render_email
 HERE       = os.path.dirname(os.path.abspath(__file__))
 TASTE_FILE = os.path.join(HERE, "taste_profile.md")
 MODEL      = os.environ.get("NEWSLETTER_MODEL", "claude-sonnet-4-6")
-MAX_SEARCHES = 3      # 낮게 유지해야 rate limit 안 걸림
+MAX_SEARCHES = 3        # rate limit 방지
+MAX_TOKENS   = 4000     # 출력 충분히 (rate limit과 무관)
 DRY_RUN    = os.environ.get("DRY_RUN", "0") == "1"
 
 CATEGORIES = [
@@ -37,11 +38,9 @@ def require_env(name):
 
 def load_taste_profile():
     if not os.path.exists(TASTE_FILE):
-        sys.exit(f"[FATAL] taste_profile.md not found")
+        sys.exit("[FATAL] taste_profile.md not found")
     with open(TASTE_FILE, "r", encoding="utf-8") as f:
-        content = f.read()
-    # 토큰 절약: 앞 2000자만 사용 (핵심 취향 정보가 앞부분에 집중)
-    return content[:2000]
+        return f.read()[:2000]   # 토큰 절약: 앞부분만
 
 def today_kr():
     now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
@@ -55,11 +54,44 @@ def extract_text(response):
     ).strip()
 
 def extract_json(text):
+    """정상 파싱 시도 후, 실패하면 완성된 조각만 건져냄(truncation 안전장치)."""
     cleaned = re.sub(r"```(?:json)?", "", text).strip()
     start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError("No JSON found")
-    return json.loads(cleaned[start:end+1])
+    if start != -1 and end > start:
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except Exception:
+            pass
+
+    # ── 살리기: intro + 완성된 discovery 객체들만 ──
+    result = {"discoveries": []}
+    m = re.search(r'"intro"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+    if m:
+        result["intro"] = m.group(1)
+
+    didx = cleaned.find('"discoveries"')
+    region = cleaned[didx:] if didx != -1 else cleaned
+    depth, buf, started = 0, "", False
+    for ch in region:
+        if ch == "{":
+            depth += 1
+            started = True
+        if started:
+            buf += ch
+        if ch == "}":
+            depth -= 1
+            if depth == 0 and started:
+                try:
+                    obj = json.loads(buf)
+                    if "key" in obj:
+                        result["discoveries"].append(obj)
+                except Exception:
+                    pass
+                buf, started = "", False
+
+    if not result["discoveries"]:
+        raise ValueError("건질 수 있는 JSON이 없습니다.")
+    return result
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 def build_prompt(taste_profile, date_str):
@@ -104,15 +136,14 @@ Write body/aside/why/title/subtitle in Korean. Keep proper nouns in original lan
 def curate(taste_profile, date_str):
     client = anthropic.Anthropic()
     prompt = build_prompt(taste_profile, date_str)
+    print(f"[info] Calling {MODEL} (searches={MAX_SEARCHES}, max_tokens={MAX_TOKENS})…")
 
-    print(f"[info] Calling {MODEL} (max_searches={MAX_SEARCHES})…")
-
-    # Rate limit 대비: 재시도 로직
+    response = None
     for attempt in range(3):
         try:
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=2500,
+                max_tokens=MAX_TOKENS,
                 tools=[{
                     "type": "web_search_20250305",
                     "name": "web_search",
@@ -123,10 +154,10 @@ def curate(taste_profile, date_str):
             break
         except anthropic.RateLimitError:
             wait = 30 * (attempt + 1)
-            print(f"[warn] Rate limit hit. {wait}초 대기 후 재시도…")
+            print(f"[warn] Rate limit. {wait}s 대기 후 재시도…")
             time.sleep(wait)
-    else:
-        sys.exit("[FATAL] Rate limit: 3회 재시도 모두 실패. 잠시 후 다시 실행하세요.")
+    if response is None:
+        sys.exit("[FATAL] Rate limit: 재시도 실패. 잠시 후 다시 실행하세요.")
 
     text = extract_text(response)
     if not text:
@@ -135,15 +166,15 @@ def curate(taste_profile, date_str):
     try:
         data = extract_json(text)
     except Exception as e:
-        print(f"[warn] JSON 파싱 실패 ({e}). 재시도…")
+        print(f"[warn] JSON 파싱 실패 ({e}). 복구 재시도…")
         repair = client.messages.create(
             model=MODEL,
-            max_tokens=2500,
+            max_tokens=MAX_TOKENS,
             messages=[
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": text},
                 {"role": "user", "content":
-                    "Return ONLY the corrected JSON object. No fences, no commentary."},
+                    "Return ONLY the corrected, COMPLETE JSON object. No fences, no commentary."},
             ],
         )
         data = extract_json(extract_text(repair))
@@ -154,10 +185,13 @@ def curate(taste_profile, date_str):
         d = by_key.get(key)
         if not d:
             continue
-        d["label_ko"] = ko
-        d["label_en"] = en
+        d["label_ko"], d["label_en"] = ko, en
         ordered.append(d)
     data["discoveries"] = ordered
+
+    if not ordered:
+        sys.exit("[FATAL] 발견 항목이 비어 있습니다.")
+    print(f"[ok] {len(ordered)}개 항목 큐레이션 완료.")
     return data
 
 # ── Send ──────────────────────────────────────────────────────────────────────
@@ -182,7 +216,7 @@ def send_email(html, subject):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     require_env("ANTHROPIC_API_KEY")
-    taste        = load_taste_profile()
+    taste         = load_taste_profile()
     date_str, now = today_kr()
 
     data             = curate(taste, date_str)
@@ -195,11 +229,9 @@ def main():
     print(f"[info] 미리보기 저장: {out}")
 
     subject = f"오늘의 발견 · {now.month}월 {now.day}일"
-
     if DRY_RUN:
         print("[dry-run] 발송 건너뜀.")
         return
-
     send_email(html, subject)
 
 if __name__ == "__main__":
